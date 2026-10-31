@@ -66,7 +66,7 @@ jobs:
           echo "::error title=告知しません::booth_ok が false です。BOOTH の商品ページに新しいインストーラを登録し、購入者側のダウンロードが新しくなったことを確認してから実行してください。順序を逆にすると「ダウンロードしても古いまま」の通知が飛びます。"
           exit 1
 
-      - name: Preflight - BOOTH item is public
+      - name: Preflight - BOOTH item is public and mentions the version
         if: ${{ !inputs.skip_booth_preflight }}
         run: |
           set -euo pipefail
@@ -86,14 +86,30 @@ jobs:
             exit 1
           fi
           python3 - <<'PY'
-          import json
-          d = json.load(open('/tmp/item.json'))
-          print("name:", d.get('name'))
-          print("published_at:", d.get('published_at'))
-          print("is_end_of_sale:", d.get('is_end_of_sale'))
+          import json, os, sys
+          ver = os.environ["VERSION"].strip().lstrip("vV")
+          d = json.load(open("/tmp/item.json"))
+          name = d.get("name") or ""
+          desc = d.get("description") or ""
+          print("name:", name)
+          print("published_at:", d.get("published_at"))
+          print("is_end_of_sale:", d.get("is_end_of_sale"))
+          print("description head:", desc[:160].replace("\n", " / "))
+          # BOOTH の商品ページには「版」を示すフィールドが無い(name/説明文しか公開されない)。
+          # 購入者が新しい版かどうかを判別できるよう、商品名か説明文に版を書いてあることを要求する。
+          if ver not in name and ver not in desc:
+            print(
+              f"::error title=商品ページに版がありません::BOOTH の商品名/説明文に {ver} が見当たりません。"
+              f"購入者が「新しい版かどうか」を判別できないため、説明文の冒頭に"
+              f"「■ 最新版: v{ver}(YYYY-MM-DD 更新)」を書いてから告知してください。"
+            )
+            sys.exit(1)
+          print(f"OK: BOOTH のページに {ver} を確認")
           PY
         env:
           INPUT_URL: ${{ inputs.url }}
+          VERSION: ${{ inputs.version }}
+
 
       - name: Publish manifest
         env:
@@ -118,9 +134,30 @@ jobs:
           cat latest.json
           echo "--- last commit ---"
           git log -1 --stat
-          {
-            echo "### 告知内容"
-            echo '```json'
-            cat latest.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          BLOCK="$(python3 - <<'PY'
+          import json
+          from datetime import date
+          d = json.load(open("latest.json"))
+          v = d.get("version", "")
+          notes = d.get("notes", "")
+          print(f"■ 最新版: v{v}({date.today().isoformat()} 更新)")
+          if notes:
+            print(notes)
+          print()
+          print("BOOTH のダウンロードから最新のインストーラ(spellctal_%s_x64-setup.exe)を落として、上書きインストールしてください。" % v)
+          PY
+          )"
+          echo "--- BOOTH の商品説明の冒頭に貼る文 ---"
+          echo "$BLOCK"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "### 告知内容"
+              echo '```json'
+              cat latest.json
+              echo '```'
+              echo "### BOOTH の商品説明の冒頭に貼る文(必須)"
+              echo '```'
+              echo "$BLOCK"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
