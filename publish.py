@@ -12,6 +12,7 @@
 
 `--booth-ok` は「②を済ませた」という人の宣言で、無いと書き換えない。
 """
+
 import argparse
 import json
 import re
@@ -30,8 +31,11 @@ def main() -> int:
     ap.add_argument("--version", required=True, help="告知する版(例: 0.7.0)")
     ap.add_argument("--notes", default="", help="アプリ内バナーに1行で出る説明")
     ap.add_argument("--url", default=None, help="BOOTH 商品ページ(省略時は既存値を維持)")
-    ap.add_argument("--booth-ok", action="store_true",
-                    help="BOOTH に新バイナリを登録し公開を確認済み(必須)")
+    ap.add_argument(
+        "--booth-ok",
+        action="store_true",
+        help="BOOTH に新バイナリを登録し公開を確認済み(必須)",
+    )
     ap.add_argument("--no-push", action="store_true", help="commit までで push しない")
     ap.add_argument("--dry-run", action="store_true", help="書き換えずに内容を表示")
     args = ap.parse_args()
@@ -39,19 +43,22 @@ def main() -> int:
     if not SEMVER.match(args.version):
         print(f"ERROR: version が X.Y.Z 形式ではありません: {args.version}", file=sys.stderr)
         return 2
+
     if not args.booth_ok:
-        print("ERROR: --booth-ok がありません。
-"
-              "  告知は「BOOTH の商品ページに新しいインストーラを登録し、購入者側の
-"
-              "  ダウンロードが新しいものになっていることを確認した後」にだけ行います。
-"
-              "  まだなら BOOTH の登録を先に済ませてください(順序を逆にすると
-"
-              "  「ダウンロードしても古いまま」の通知が飛びます)。", file=sys.stderr)
+        print(
+            "ERROR: --booth-ok がありません。\n"
+            "  告知は「BOOTH の商品ページに新しいインストーラを登録し、購入者側の\n"
+            "  ダウンロードが新しいものになっていることを確認した後」にだけ行います。\n"
+            "  まだなら BOOTH の登録を先に済ませてください(順序を逆にすると\n"
+            "  「ダウンロードしても古いまま」の通知が飛びます)。",
+            file=sys.stderr,
+        )
         return 3
 
-    current = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
+    current = {}
+    if MANIFEST.exists():
+        current = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
     manifest = {
         "version": args.version.lstrip("v"),
         "notes": args.notes or current.get("notes", ""),
@@ -68,18 +75,19 @@ def main() -> int:
     MANIFEST.write_text(text, encoding="utf-8")
     print(text)
 
-    def git(*a):
+    if not (ROOT / ".git").exists():
+        print("NOTE: git リポジトリではないので commit/push はしていません。latest.json を push してください。")
+        return 0
+
+    def git(*a: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True)
 
-    if (ROOT / ".git").exists():
-        git("add", "latest.json")
-        r = git("commit", "-m", f"publish v{manifest['version']}")
-        print(r.stdout.strip() or r.stderr.strip())
-        if not args.no_push:
-            p = git("push")
-            print(p.stdout.strip() or p.stderr.strip())
-    else:
-        print("NOTE: git リポジトリではないので commit/push はしていません。latest.json を push してください。")
+    git("add", "latest.json")
+    r = git("commit", "-m", f"publish v{manifest['version']}")
+    print(r.stdout.strip() or r.stderr.strip())
+    if not args.no_push:
+        p = git("push")
+        print(p.stdout.strip() or p.stderr.strip())
     return 0
 
 
