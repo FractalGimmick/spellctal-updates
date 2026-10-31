@@ -1,0 +1,126 @@
+name: Publish update notice
+
+# 告知(= アプリに「新しいバージョンがあります」を出させる)専用の手動ワークフロー。
+#
+#   タグを打ってもリリースを切っても、**告知は自動では行われません。**
+#   BOOTH の商品ページに新しいインストーラを登録し、購入者側のダウンロードが
+#   新しくなったことを確認した後に、これを手で実行します。
+#
+#   実行方法(どちらでも):
+#     - GitHub の Actions タブ → 「Publish update notice」→ Run workflow
+#     - gh workflow run publish-update.yml -f version=0.7.0 -f notes="..." -f booth_ok=true
+#
+#   順序を逆にすると「ダウンロードしても古いまま」の通知が飛びます。
+#   そのため booth_ok が false のときは何もせず失敗します(安全側)。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '告知する版 (X.Y.Z。例: 0.7.0)'
+        required: true
+        type: string
+      notes:
+        description: 'アプリ内バナーに出す1行の説明 (空なら現状維持)'
+        required: false
+        type: string
+        default: ''
+      url:
+        description: 'BOOTH 商品ページ (空なら現状維持)'
+        required: false
+        type: string
+        default: ''
+      booth_ok:
+        description: 'BOOTH に新バイナリを登録し、購入者側のダウンロードが新しくなったことを確認した'
+        required: true
+        type: boolean
+        default: false
+      dry_run:
+        description: '書き換えずに内容だけ表示する'
+        required: false
+        type: boolean
+        default: false
+      skip_booth_preflight:
+        description: '商品ページの公開チェックを飛ばす (通常は false)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Refuse without BOOTH confirmation
+        if: ${{ !inputs.booth_ok }}
+        run: |
+          echo "::error title=告知しません::booth_ok が false です。BOOTH の商品ページに新しいインストーラを登録し、購入者側のダウンロードが新しくなったことを確認してから実行してください。順序を逆にすると「ダウンロードしても古いまま」の通知が飛びます。"
+          exit 1
+
+      - name: Preflight - BOOTH item is public
+        if: ${{ !inputs.skip_booth_preflight }}
+        run: |
+          set -euo pipefail
+          ITEM_URL="${INPUT_URL:-}"
+          if [ -z "$ITEM_URL" ]; then
+            ITEM_URL="$(python3 -c "import json;print(json.load(open('latest.json')).get('url',''))")"
+          fi
+          ID="$(printf '%s' "$ITEM_URL" | sed -nE 's#.*items/([0-9]+).*#\1#p')"
+          if [ -z "$ID" ]; then
+            echo "::error title=商品URLが不正::商品URLから item id を取れません: ${ITEM_URL}"
+            exit 1
+          fi
+          code="$(curl -sS -o /tmp/item.json -w '%{http_code}' "https://booth.pm/ja/items/${ID}.json")"
+          echo "BOOTH item ${ID}: HTTP ${code}"
+          if [ "$code" != "200" ]; then
+            echo "::error title=商品ページが公開されていません::https://booth.pm/ja/items/${ID}.json が HTTP ${code} です。BOOTH 側の公開が済んでから告知してください。"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          d = json.load(open('/tmp/item.json'))
+          print("name:", d.get('name'))
+          print("published_at:", d.get('published_at'))
+          print("is_end_of_sale:", d.get('is_end_of_sale'))
+          PY
+        env:
+          INPUT_URL: ${{ inputs.url }}
+
+      - name: Publish manifest
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+          ITEM_URL: ${{ inputs.url }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "Spellctal Release Bot"
+          git config user.email "release-bot@users.noreply.github.com"
+          args=(--version "$VERSION" --booth-ok)
+          if [ -n "$NOTES" ]; then args+=(--notes "$NOTES"); fi
+          if [ -n "$ITEM_URL" ]; then args+=(--url "$ITEM_URL"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 publish.py "${args[@]}"
+
+      - name: Show result
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "--- latest.json ---"
+          cat latest.json
+          echo "--- last commit ---"
+          git log -1 --stat
+          {
+            echo "### 告知内容"
+            echo '```json'
+            cat latest.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
