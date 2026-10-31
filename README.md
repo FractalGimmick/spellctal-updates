@@ -26,6 +26,26 @@ BOOTH へのバイナリ登録は手動で、GitHub のリリースからラグ�
 ※ ただし「後で」を押した利用者は、同じ版では再通知されない(押した版を記憶するため)。
 　 取り下げるより、BOOTH の登録を先に済ませてから告知するのが正しい。
 
+## GitHub Actions から告知する(推奨)
+
+Actions タブ →「Publish update notice」→ Run workflow。CLI なら:
+
+```bash
+gh workflow run publish-update.yml \
+  -f version=0.7.0 \
+  -f notes="字幕編集(ベータ)を追加しました。" \
+  -f booth_ok=true
+```
+
+ガード(すべて実測済み):
+
+- `booth_ok` が false だと**何もせず失敗**(安全側)
+- 商品URLから item id を取り、`https://booth.pm/ja/items/<id>.json` が **200 でなければ告知せず失敗**
+  (商品ページが未公開・未登録の検知。※ファイルだけ古い、までは外から分からない)
+- `dry_run=true` で内容確認だけ、`skip_booth_preflight=true` で公開チェックを飛ばせる(通常は不要)
+- 同じ内容の再実行は「変更なし」で終わる(安全に何度でも実行できる)
+- push に失敗したら**赤くなる**(緑なのに未反映、を防ぐ)
+
 ## フィールド
 
 - `version` … **必須**。アプリのバージョンと比較される(`0.7.0` / `v0.7.0` どちらでも可、`X.Y.Z` の3要素必須)
