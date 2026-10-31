@@ -38,6 +38,11 @@ def main() -> int:
     )
     ap.add_argument("--no-push", action="store_true", help="commit までで push しない")
     ap.add_argument("--dry-run", action="store_true", help="書き換えずに内容を表示")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="内容が同じでも書き換えて published_at を更新する(通常は不要)",
+    )
     args = ap.parse_args()
 
     if not SEMVER.match(args.version):
@@ -59,14 +64,29 @@ def main() -> int:
     if MANIFEST.exists():
         current = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
-    manifest = {
+    # 「告知内容そのもの」(published_at を除く)が既に同じなら、コミットを作らない。
+    # 同じ内容で何度でも安全に実行できるようにするため(CI からの再実行を含む)。
+    wanted = {
         "version": args.version.lstrip("v"),
         "notes": args.notes or current.get("notes", ""),
         "url": args.url or current.get("url", ""),
+    }
+    same = all(current.get(k) == v for k, v in wanted.items())
+    manifest = {
+        **wanted,
         # 人が履歴を追うための記録。アプリは未知フィールドとして無視する。
-        "published_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "published_at": (
+            current.get("published_at", "")
+            if same and current.get("published_at")
+            else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ),
     }
     text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+
+    if same and not args.force:
+        print(f"変更なし: すでに v{wanted['version']} を告知済みです(何もしません)。")
+        print(text)
+        return 0
 
     if args.dry_run:
         print(text)
@@ -85,9 +105,15 @@ def main() -> int:
     git("add", "latest.json")
     r = git("commit", "-m", f"publish v{manifest['version']}")
     print(r.stdout.strip() or r.stderr.strip())
+    if r.returncode != 0:
+        print("ERROR: commit に失敗しました(告知は反映されていません)", file=sys.stderr)
+        return 4
     if not args.no_push:
         p = git("push")
         print(p.stdout.strip() or p.stderr.strip())
+        if p.returncode != 0:
+            print("ERROR: push に失敗しました(コミットは作られましたが、告知はまだ反映されていません)", file=sys.stderr)
+            return 5
     return 0
 
 
