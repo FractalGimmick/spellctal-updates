@@ -1,0 +1,26 @@
+name: Test manifest publisher
+
+# publish.py の書き換えロジックの回帰テスト。
+# 告知は公開 JSON を書き換える=購入者に通知が飛ぶ操作なので、notes の引き継ぎや
+# 同一内容の no-op、安全側の拒否が壊れていないことを毎 push で確かめる。
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'latest.json' # 告知そのもの(データ)だけの push では走らせない
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Run publisher tests
+        run: python3 -m unittest -v test_publish

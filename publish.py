@@ -90,7 +90,10 @@ def main() -> int:
         # 人が履歴を追うための記録。アプリは未知フィールドとして無視する。
         "published_at": (
             current.get("published_at", "")
-            if same and current.get("published_at")
+            # --force は「内容が同じでもタイムスタンプを更新する」契約なので、
+            # same でも今の時刻を書く(ここで force を見落とすと、書き換え内容が
+            # 同一のまま git commit が空になり「失敗したように見える」)。
+            if same and current.get("published_at") and not args.force
             else datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         ),
     }
