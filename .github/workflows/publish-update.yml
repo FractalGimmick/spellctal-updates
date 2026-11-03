@@ -21,7 +21,7 @@ on:
         required: true
         type: string
       notes:
-        description: 'アプリ内バナーに出す1行の説明 (空なら現状維持)'
+        description: 'アプリ内バナーに出す1行の説明 (空なら「BOOTH から最新版を入手できます。」が出る)'
         required: false
         type: string
         default: ''

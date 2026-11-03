@@ -29,7 +29,14 @@ SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 def main() -> int:
     ap = argparse.ArgumentParser(description="latest.json を更新して告知する")
     ap.add_argument("--version", required=True, help="告知する版(例: 0.7.0)")
-    ap.add_argument("--notes", default="", help="アプリ内バナーに1行で出る説明")
+    ap.add_argument(
+        "--notes",
+        default="",
+        help=(
+            "アプリ内バナーに1行で出る説明。"
+            "空ならアプリ側が「BOOTH から最新版を入手できます。」を出す(推奨)"
+        ),
+    )
     ap.add_argument("--url", default=None, help="BOOTH 商品ページ(省略時は既存値を維持)")
     ap.add_argument(
         "--booth-ok",
@@ -66,9 +73,15 @@ def main() -> int:
 
     # 「告知内容そのもの」(published_at を除く)が既に同じなら、コミットを作らない。
     # 同じ内容で何度でも安全に実行できるようにするため(CI からの再実行を含む)。
+    # notes は「その回に出す文」をそのまま書く。省略(空)なら空で書く = 前回の文を
+    # 引き継がない。アプリ側は notes が空なら「BOOTH から最新版を入手できます。」を
+    # 自前で出す(src/update.ts の updateNoticeText)ので、ここでプレースホルダを
+    # 焼き込む必要がない。以前は current を引き継いでいたため、最初の告知で入った
+    # 「現在の最新版です。」が以後ずっとバナー本文として出続けていた。
+    notes = args.notes.strip()
     wanted = {
         "version": args.version.lstrip("v"),
-        "notes": args.notes or current.get("notes", ""),
+        "notes": notes,
         "url": args.url or current.get("url", ""),
     }
     same = all(current.get(k) == v for k, v in wanted.items())
@@ -82,6 +95,11 @@ def main() -> int:
         ),
     }
     text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    if not notes:
+        print(
+            "notes は空です。アプリのバナー本文は"
+            "「BOOTH から最新版を入手できます。」になります。"
+        )
 
     if same and not args.force:
         print(f"変更なし: すでに v{wanted['version']} を告知済みです(何もしません)。")
